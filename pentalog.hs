@@ -8,7 +8,7 @@ import Control.Monad (liftM, forM_, forM)
 import Data.Time.Format (parseTime)
 import System.Locale (defaultTimeLocale)
 import Data.Time.Clock
-import Data.Time.Calendar (Day, addDays)
+import Data.Time.Calendar (Day, addDays, toModifiedJulianDay)
 import Data.Maybe (fromMaybe)
 import Data.List (foldl', intercalate)
 import Data.Map (Map)
@@ -74,7 +74,10 @@ parseLine = getResult . parse line
                     return $ if C.unpack method == "GET" &&
                                 code >= 200 &&
                                 code < 300
-                             then Get date path size
+                             then toModifiedJulianDay date `seq`
+                                  C.unpack path `seq`
+                                  size `seq`
+                                  Get date path size
                              else Unknown
           char = word8 . fromIntegral . ord
           space = char ' '
@@ -91,18 +94,15 @@ parseLine = getResult . parse line
 -}
 
 type Stats k = Map k FileStats
-type FileStats = Map Day Integer
+type FileStats = Map Day Int
 
 collectRequest :: Stats C.ByteString -> Request -> Stats C.ByteString
 collectRequest stats (Get day file size)
-    = Map.alter (Just .
-             Map.alter (Just .
-                        (+ size) .
-                        fromMaybe 0
-                       ) day .
-             fromMaybe Map.empty
-            ) file stats
-
+    = let stats' = Map.alter (Just .
+                              Map.insertWith' (+) day size .
+                              fromMaybe Map.empty
+                             ) file stats
+      in stats' `seq` stats'
 
 filterPentaMedia :: Stats String -> Stats String
 filterPentaMedia
