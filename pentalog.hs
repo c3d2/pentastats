@@ -53,6 +53,7 @@ reqPath Unknown = error "No path for Unknown request"
 parseLine :: C.ByteString -> Request
 parseLine = getResult . parse line
     where getResult (_, Right a) = a
+          getResult _ = Unknown
           line = do ip <- word
                     space
                     ident <- word
