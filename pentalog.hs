@@ -42,7 +42,7 @@ dateRange (begin, end) | begin < end
     
 
 
-data Request = Get Day C.ByteString Integer
+data Request = Get !Day !C.ByteString !Integer
              | Unknown
              deriving (Show)
 reqIsGet (Get _ _ _) = True
@@ -77,10 +77,7 @@ parseLine = getResult . parse line
                     return $ if C.unpack method == "GET" &&
                                 code >= 200 &&
                                 code < 300
-                             then toModifiedJulianDay date `seq`
-                                  C.unpack path `seq`
-                                  size `seq`
-                                  Get date path size
+                             then Get date path size
                              else Unknown
           char = word8 . fromIntegral . ord
           space = char ' '
