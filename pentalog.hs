@@ -3,12 +3,10 @@ module Main (main, getFileSize) where
 import qualified Data.ByteString.Lazy.Char8 as C
 import Data.Attoparsec
 import Prelude hiding (takeWhile)
-import Data.Char (chr, ord, isDigit)
+import Data.Char (isDigit, isAlpha)
 import Control.Monad (liftM, forM_, forM)
-import Data.Time.Format (parseTime)
-import System.Locale (defaultTimeLocale)
 import Data.Time.Clock
-import Data.Time.Calendar (Day, addDays, toModifiedJulianDay)
+import Data.Time.Calendar (Day, addDays, fromGregorian)
 import Data.Maybe (fromMaybe)
 import Data.List (foldl', intercalate)
 import Data.Map (Map)
@@ -21,6 +19,7 @@ import Network.URI (parseURI)
 import Text.Printf (printf)
 import Control.Parallel.Strategies
 import GHC.Conc (numCapabilities)
+import Data.ByteString.Internal (w2c, c2w)
 
 
 getFileSize :: C.ByteString -> IO Integer
@@ -57,44 +56,58 @@ parseLine :: C.ByteString -> Request
 parseLine = getResult . parse line
     where getResult (_, Right a) = a
           getResult _ = Unknown
-          line = do ip <- word
+          line = do ip <- {-# SCC "wordIP" #-} word
                     space
-                    ident <- word
+                    ident <- {-# SCC "wordIdent" #-} word
                     space
-                    user <- word
+                    user <- {-# SCC "wordUser" #-} word
                     space
                     char '['
-                    date <- parseDate `liftM` takeWhile ((/= ']') . chr . fromIntegral)
-                    char ']'
-                    space
+                    date <- {-# SCC "date" #-} date
+                    takeWhile ((/= '"') . w2c)
                     char '"'
-                    method <- word
+                    method <- {-# SCC "wordMethod" #-} word
                     space
-                    path <- word
+                    path <- {-# SCC "wordPath" #-} word
                     space
-                    ver <- word
+                    ver <- {-# SCC "wordVer" #-} word
                     space
-                    code <- num
+                    code <- {-# SCC "wordCode" #-} num'
                     space
-                    size <- num
-                    return $ if C.unpack method == "GET" &&
+                    size <- {-# SCC "wordSize" #-} num
+                    return $ if {-# SCC "unpackMethod" #-} method == C.pack "GET" &&
                                 code >= 200 &&
                                 code < 300
-                             then Get date path size
-                             else Unknown
-          char = word8 . fromIntegral . ord
+                             then {-# SCC "Get" #-} Get date path size
+                             else {-# SCC "Unknown" #-} Unknown
+          char = word8 . c2w
           space = char ' '
-          word = takeWhile $ (/= ' ') . chr . fromIntegral
-          num = (maybe 0 fst . C.readInteger) `liftM` takeWhile (isDigit . chr . fromIntegral)
-          -- Here be dragons
-          parseDate = utctDay .
-                      fromMaybe undefined .
-                      parseTime defaultTimeLocale "%d/%b/%Y:%H:%M:%S %z" .
-                      C.unpack
-{-
-          utcToUnix utc = truncate $ diffUTCTime utc utc1970
-          utc1970 = fromMaybe undefined $ parseTime defaultTimeLocale "" ""
--}
+          word = takeWhile $ (/= ' ') . w2c
+          num = (maybe 0 fst . C.readInteger) `liftM` takeWhile (isDigit . w2c)
+          num' = (maybe 0 fst . C.readInt) `liftM` takeWhile (isDigit . w2c)
+          date = do day <- num'
+                    char '/'
+                    month <- month
+                    char '/'
+                    year <- num
+                    char ':'
+                    return $ fromGregorian year month day
+          month = let m name num = takeWhile (isAlpha . w2c) >>= \name' ->
+                                   if C.pack name == name'
+                                   then return num
+                                   else fail $ "No such month: " ++ C.unpack name'
+                  in choice [m "Jan" 1,
+                             m "Feb" 2,
+                             m "Mar" 3,
+                             m "Apr" 4,
+                             m "May" 5,
+                             m "Jun" 6,
+                             m "Jul" 7,
+                             m "Aug" 8,
+                             m "Sep" 9,
+                             m "Oct" 10,
+                             m "Nov" 11,
+                             m "Dec" 12]
 
 type Stats k = Map k FileStats
 type FileStats = Map Day Integer
