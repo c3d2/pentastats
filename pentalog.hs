@@ -96,13 +96,13 @@ parseLine = getResult . parse line
 type Stats k = Map k FileStats
 type FileStats = Map Day Integer
 
-collectRequest :: Stats C.ByteString -> Request -> Stats C.ByteString
-collectRequest stats (Get day file size)
-    = let stats' = Map.alter (Just .
-                              Map.insertWith' (+) day size .
-                              fromMaybe Map.empty
-                             ) file stats
-      in stats'
+collectRequest :: Request -> Stats C.ByteString -> Stats C.ByteString
+collectRequest (Get day file size) = Map.alter (Just .
+                                                Map.insertWith' (+) day size .
+                                                fromMaybe Map.empty
+                                               ) file
+collectRequest Unknown = id
+
 
 isPentaMedia :: C.ByteString -> Bool
 isPentaMedia fn = not (C.null fn) &&
@@ -211,7 +211,7 @@ createOutput fnStats
 
 main = C.getContents >>=
        return .
-       foldl collectRequest Map.empty .
+       foldl (flip collectRequest) Map.empty .
        filter (isPentaMedia . reqPath) .
        filter reqIsGet .
        map parseLine .
