@@ -19,6 +19,8 @@ import System.Directory (removeFile)
 import qualified Network.HTTP as HTTP
 import Network.URI (parseURI)
 import Text.Printf (printf)
+import Control.Parallel.Strategies
+import GHC.Conc (numCapabilities)
 
 
 getFileSize :: C.ByteString -> IO Integer
@@ -45,6 +47,7 @@ dateRange (begin, end) | begin < end
 data Request = Get !Day !C.ByteString !Integer
              | Unknown
              deriving (Show)
+instance NFData Request
 reqIsGet (Get _ _ _) = True
 reqIsGet _ = False
 reqPath (Get _ path _) = path
@@ -209,11 +212,20 @@ createOutput fnStats
               = do day <- dateRange (fst $ Map.findMin stats, fst $ Map.findMax stats)
                    return (day, fromMaybe 0 $ Map.lookup day stats)
 
+chunkify :: Int -> [a] -> [[a]]
+chunkify _ [] = []
+chunkify n xs = let (xs', xs'') = splitAt n xs
+                in xs' : chunkify n xs''
+
+workList = concat . parBuffer (4 * numCapabilities) rdeepseq . chunkify chunkSize
+    where chunkSize = 4096
+
 main = C.getContents >>=
        return .
        foldl (flip collectRequest) Map.empty .
        filter (isPentaMedia . reqPath) .
        filter reqIsGet .
+       workList .
        map parseLine .
        C.lines >>=
        getFileSizes >>=
