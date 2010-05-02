@@ -1,7 +1,9 @@
-module Main (main, getFileSize) where
+{-# LANGUAGE BangPatterns #-}
+module Main (main, getFileSize, chunkify) where
 
+import qualified Data.ByteString.Char8 as SC
 import qualified Data.ByteString.Lazy.Char8 as C
-import Data.Attoparsec
+import Data.Attoparsec.Lazy hiding (take)
 import Prelude hiding (takeWhile)
 import Data.Char (isDigit, isAlpha)
 import Control.Monad (liftM, forM_, forM)
@@ -22,13 +24,13 @@ import GHC.Conc (numCapabilities)
 import Data.ByteString.Internal (w2c, c2w)
 
 
-getFileSize :: C.ByteString -> IO Integer
+getFileSize :: SC.ByteString -> IO Integer
 getFileSize path
-    = do putStrLn $ "HEAD " ++ C.unpack path
+    = do putStrLn $ "HEAD " ++ SC.unpack path
          getSize `liftM` HTTP.simpleHTTP headRequest
     where uri = fromMaybe undefined $
                 parseURI $
-                "http://ftp.c3d2.de" ++ C.unpack path
+                "http://ftp.c3d2.de" ++ SC.unpack path
           headRequest :: HTTP.Request C.ByteString
           headRequest = HTTP.mkRequest HTTP.HEAD uri
           getSize (Right rsp) = read $
@@ -40,23 +42,23 @@ dateRange (begin, end) | begin < end
                            = begin : dateRange (addDays 1 begin, end)
                        | otherwise
                            = [end]
-    
 
-
-data Request = Get !Day !C.ByteString !Integer
+newtype Host = Host SC.ByteString
+             deriving (Show, Eq, Ord)
+data Request = Get !Day !SC.ByteString !Host !Integer
              | Unknown
              deriving (Show)
 instance NFData Request
-reqIsGet (Get _ _ _) = True
+reqIsGet (Get _ _ _ _) = True
 reqIsGet _ = False
-reqPath (Get _ path _) = path
+reqPath (Get _ path _ _) = path
 reqPath Unknown = error "No path for Unknown request"
 
 parseLine :: C.ByteString -> Request
-parseLine = getResult . parse line
-    where getResult (_, Right a) = a
+parseLine = {-# SCC "getResult" #-} getResult . {-# SCC "parse" #-} parse line
+    where getResult (Done _ !a) = a
           getResult _ = Unknown
-          line = do ip <- {-# SCC "wordIP" #-} word
+          line = do host <- {-# SCC "wordIP" #-} Host `liftM` word
                     space
                     ident <- {-# SCC "wordIdent" #-} word
                     space
@@ -75,16 +77,16 @@ parseLine = getResult . parse line
                     code <- {-# SCC "wordCode" #-} num'
                     space
                     size <- {-# SCC "wordSize" #-} num
-                    return $ if {-# SCC "unpackMethod" #-} method == C.pack "GET" &&
+                    return $ if {-# SCC "unpackMethod" #-} SC.unpack method == "GET" &&
                                 code >= 200 &&
                                 code < 300
-                             then {-# SCC "Get" #-} Get date path size
+                             then {-# SCC "Get" #-} Get date path host size
                              else {-# SCC "Unknown" #-} Unknown
           char = word8 . c2w
           space = char ' '
           word = takeWhile $ (/= ' ') . w2c
-          num = (maybe 0 fst . C.readInteger) `liftM` takeWhile (isDigit . w2c)
-          num' = (maybe 0 fst . C.readInt) `liftM` takeWhile (isDigit . w2c)
+          num = (maybe 0 fst . SC.readInteger) `liftM` takeWhile (isDigit . w2c)
+          num' = (maybe 0 fst . SC.readInt) `liftM` takeWhile (isDigit . w2c)
           date = do day <- num'
                     char '/'
                     month <- month
@@ -93,9 +95,9 @@ parseLine = getResult . parse line
                     char ':'
                     return $ fromGregorian year month day
           month = let m name num = takeWhile (isAlpha . w2c) >>= \name' ->
-                                   if C.pack name == name'
+                                   if SC.unpack name' == name
                                    then return num
-                                   else fail $ "No such month: " ++ C.unpack name'
+                                   else fail $ "No such month: " ++ SC.unpack name'
                   in choice [m "Jan" 1,
                              m "Feb" 2,
                              m "Mar" 3,
@@ -112,33 +114,33 @@ parseLine = getResult . parse line
 type Stats k = Map k FileStats
 type FileStats = Map Day Integer
 
-collectRequest :: Request -> Stats C.ByteString -> Stats C.ByteString
-collectRequest (Get day file size) = Map.alter (Just .
-                                                Map.insertWith' (+) day size .
-                                                fromMaybe Map.empty
-                                               ) file
+collectRequest :: Request -> Stats SC.ByteString -> Stats SC.ByteString
+collectRequest (Get day file host size) = Map.alter (Just .
+                                                     Map.insertWith' (+) day size .
+                                                     fromMaybe Map.empty
+                                                    ) file
 collectRequest Unknown = id
 
 
-isPentaMedia :: C.ByteString -> Bool
-isPentaMedia fn = not (C.null fn) &&
+isPentaMedia :: SC.ByteString -> Bool
+isPentaMedia fn = not (SC.null fn) &&
                   isValid fn &&
                   oneDot fn &&
                   (fn `startsWith` "/pentaradio/" ||
                    fn `startsWith` "/pentacast/")
     -- TODO: URL normalization & URI decoding
-    where startsWith a b = C.unpack (C.take (fromIntegral $ length b) a) == b
-          oneDot s = case C.uncons s of
+    where startsWith a b = take (fromIntegral $ length b) (SC.unpack a) == b
+          oneDot s = case SC.uncons s of
                        Just ('.', s') -> oneDot' s'
                        Just (_, s') -> oneDot s'
                        Nothing -> False
-          oneDot' s = case C.uncons s of
+          oneDot' s = case SC.uncons s of
                         Just ('.', s') -> False
                         Just (_, s') -> oneDot' s'
                         Nothing -> True
-          isValid = C.all (`notElem` "?&")
+          isValid = SC.all (`notElem` "?&")
 
-getFileSizes :: Stats C.ByteString -> IO (Stats (C.ByteString, Integer))
+getFileSizes :: Stats SC.ByteString -> IO (Stats (SC.ByteString, Integer))
 getFileSizes
     = liftM Map.fromList .
       mapM (\(fn, stats) ->
@@ -147,41 +149,41 @@ getFileSizes
            ) .
       Map.toList
 
-reduceFilenames :: Stats (C.ByteString, Integer) -> Stats (C.ByteString, C.ByteString, Integer)
+reduceFilenames :: Stats (SC.ByteString, Integer) -> Stats (SC.ByteString, SC.ByteString, Integer)
 reduceFilenames
     = Map.mapKeys (\(fn, size) ->
                        let fn' = last $ split '/' fn
                            fn'' = split '.' fn'
                            ext = last fn''
-                           fn''' = C.intercalate (C.singleton '.') $
+                           fn''' = SC.intercalate (SC.singleton '.') $
                                    take (length fn'' - 1) fn''
                        in (fn''', ext, size)
                   )
-    where split :: Char -> C.ByteString -> [C.ByteString]
-          split c s = case C.break (== c) s of
-                        (s, s'') | C.null s'' -> [s]
-                        (s', s'') -> s' : split c (C.tail s'')
+    where split :: Char -> SC.ByteString -> [SC.ByteString]
+          split c s = case SC.break (== c) s of
+                        (s, s'') | SC.null s'' -> [s]
+                        (s', s'') -> s' : split c (SC.tail s'')
 
-groupByExt :: Stats (C.ByteString, C.ByteString, Integer) -> Map C.ByteString (Stats (C.ByteString, Integer))
+groupByExt :: Stats (SC.ByteString, SC.ByteString, Integer) -> Map SC.ByteString (Stats (SC.ByteString, Integer))
 groupByExt
     = Map.foldWithKey (\(fn, ext, size) stats ->
                            Map.alter (Just . Map.insert (ext, size) stats . fromMaybe Map.empty
                                      ) fn
                       ) Map.empty
 
-createOutput :: Map C.ByteString (Stats (C.ByteString, Integer)) -> IO ()
+createOutput :: Map SC.ByteString (Stats (SC.ByteString, Integer)) -> IO ()
 createOutput fnStats
     = do forM_ (Map.toList fnStats) $ \(fn, extStats) ->
-             do putStrLn $ C.unpack fn ++ " " ++ (show $ Map.keys extStats)
+             do putStrLn $ SC.unpack fn ++ " " ++ (show $ Map.keys extStats)
                 render fn extStats
          writeFile "index.html" indexSource
     where indexSource = "<h1>Pentamedia Stats</h1>" ++
                         concatMap (\(fn, extStats) ->
-                                       "<h2>" ++ C.unpack fn ++ "</h2>" ++
+                                       "<h2>" ++ SC.unpack fn ++ "</h2>" ++
                                        "<p>" ++ printf "%.1f" (downloads extStats) ++ " downloads</p>" ++
-                                       "<img src=\"" ++ C.unpack fn ++ ".png\"/>"
+                                       "<img src=\"" ++ SC.unpack fn ++ ".png\"/>"
                                   ) (Map.toList fnStats)
-          downloads :: Stats (C.ByteString, Integer) -> Double
+          downloads :: Stats (SC.ByteString, Integer) -> Double
           downloads
               = foldl' (\sum ((ext, fileSize), stats) ->
                             sum + (fromIntegral (Map.fold (+) 0 stats) / fromIntegral fileSize)
@@ -191,11 +193,12 @@ createOutput fnStats
               = do dataSources <- forM (zip [0..] $ Map.toList extStats) $ \(i, ((ext, size), stats)) ->
                                   do writeData i size stats
                                      return $ (ext, dataFile i)
-                   writeFile plotSourceFile $ plotSource (C.unpack fn ++ ".png") dataSources
+                   writeFile plotSourceFile $ plotSource (SC.unpack fn ++ ".png") dataSources
                    system $ "gnuplot " ++ plotSourceFile
                    removeFile plotSourceFile
-                   mapM_ removeFile $ map (C.unpack . snd) dataSources
-          plotSource :: String -> [(C.ByteString, C.ByteString)] -> String
+                   mapM_ removeFile $ map (SC.unpack . snd) dataSources
+                   return ()
+          plotSource :: String -> [(SC.ByteString, SC.ByteString)] -> String
           plotSource outfile dataSources
               = "set terminal png tiny\n" ++
                 "set output '" ++ outfile ++ "'\n" ++
@@ -210,14 +213,14 @@ createOutput fnStats
                                (if i == 0
                                 then " "
                                 else ", ") ++
-                               "'" ++ C.unpack dataFile ++  "' using 1:2 title '" ++ C.unpack ext ++ "' with boxes"
+                               "'" ++ SC.unpack dataFile ++  "' using 1:2 title '" ++ SC.unpack ext ++ "' with boxes"
                           ) (zip [0..] dataSources)
           plotSourceFile = "graph.gnuplot"
-          dataFile :: Int -> C.ByteString
-          dataFile i = C.pack $ "data-" ++ show i
+          dataFile :: Int -> SC.ByteString
+          dataFile i = SC.pack $ "data-" ++ show i
           writeData :: Int -> Integer -> FileStats -> IO ()
           writeData i fileSize stats
-              = withFile (C.unpack $ dataFile i) WriteMode $ \f ->
+              = withFile (SC.unpack $ dataFile i) WriteMode $ \f ->
                 forM_ (fillDayStats stats) $ \(day, size) ->
                 hPutStrLn f $ show day ++ " " ++ show (fromIntegral size / fromIntegral fileSize)
           fillDayStats :: FileStats -> [(Day, Integer)]
