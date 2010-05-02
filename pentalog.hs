@@ -170,7 +170,10 @@ limitByHost = Map.mapWithKey $ \(fn, size) ->
               max size transmitted
               
 forgetHosts :: Stats (SC.ByteString, Integer) (Day, Host) -> Stats (SC.ByteString, Integer) Day
-forgetHosts = Map.map $ Map.mapKeys fst
+forgetHosts = Map.map $ 
+              Map.foldWithKey (\(day, host) transmitted ->
+                                   Map.alter (Just . (+ transmitted) . fromMaybe 0) day
+              ) Map.empty
 
 groupByExt :: Stats (SC.ByteString, SC.ByteString, Integer) Day -> Map SC.ByteString (Stats (SC.ByteString, Integer) Day)
 groupByExt
