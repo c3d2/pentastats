@@ -167,7 +167,7 @@ reduceFilenames
 limitByHost :: Stats (SC.ByteString, Integer) (Day, Host) -> Stats (SC.ByteString, Integer) (Day, Host)
 limitByHost = Map.mapWithKey $ \(fn, size) ->
               Map.map $ \transmitted ->
-              max size transmitted
+              min size transmitted
               
 forgetHosts :: Stats (SC.ByteString, Integer) (Day, Host) -> Stats (SC.ByteString, Integer) Day
 forgetHosts = Map.map $ 
