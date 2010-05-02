@@ -111,12 +111,12 @@ parseLine = {-# SCC "getResult" #-} getResult . {-# SCC "parse" #-} parse line
                              m "Nov" 11,
                              m "Dec" 12]
 
-type Stats k = Map k FileStats
-type FileStats = Map Day Integer
+type Stats k k' = Map k (FileStats k')
+type FileStats k = Map k Integer
 
-collectRequest :: Request -> Stats SC.ByteString -> Stats SC.ByteString
+collectRequest :: Request -> Stats SC.ByteString (Day, Host) -> Stats SC.ByteString (Day, Host)
 collectRequest (Get day file host size) = Map.alter (Just .
-                                                     Map.insertWith' (+) day size .
+                                                     Map.insertWith' (+) (day, host) size .
                                                      fromMaybe Map.empty
                                                     ) file
 collectRequest Unknown = id
@@ -140,7 +140,7 @@ isPentaMedia fn = not (SC.null fn) &&
                         Nothing -> True
           isValid = SC.all (`notElem` "?&")
 
-getFileSizes :: Stats SC.ByteString -> IO (Stats (SC.ByteString, Integer))
+getFileSizes :: Stats SC.ByteString a -> IO (Stats (SC.ByteString, Integer) a)
 getFileSizes
     = liftM Map.fromList .
       mapM (\(fn, stats) ->
@@ -149,7 +149,7 @@ getFileSizes
            ) .
       Map.toList
 
-reduceFilenames :: Stats (SC.ByteString, Integer) -> Stats (SC.ByteString, SC.ByteString, Integer)
+reduceFilenames :: Stats (SC.ByteString, Integer) Day -> Stats (SC.ByteString, SC.ByteString, Integer) Day
 reduceFilenames
     = Map.mapKeys (\(fn, size) ->
                        let fn' = last $ split '/' fn
@@ -163,15 +163,23 @@ reduceFilenames
           split c s = case SC.break (== c) s of
                         (s, s'') | SC.null s'' -> [s]
                         (s', s'') -> s' : split c (SC.tail s'')
+                        
+limitByHost :: Stats (SC.ByteString, Integer) (Day, Host) -> Stats (SC.ByteString, Integer) (Day, Host)
+limitByHost = Map.mapWithKey $ \(fn, size) ->
+              Map.map $ \transmitted ->
+              max size transmitted
+              
+forgetHosts :: Stats (SC.ByteString, Integer) (Day, Host) -> Stats (SC.ByteString, Integer) Day
+forgetHosts = Map.map $ Map.mapKeys fst
 
-groupByExt :: Stats (SC.ByteString, SC.ByteString, Integer) -> Map SC.ByteString (Stats (SC.ByteString, Integer))
+groupByExt :: Stats (SC.ByteString, SC.ByteString, Integer) Day -> Map SC.ByteString (Stats (SC.ByteString, Integer) Day)
 groupByExt
     = Map.foldWithKey (\(fn, ext, size) stats ->
                            Map.alter (Just . Map.insert (ext, size) stats . fromMaybe Map.empty
                                      ) fn
                       ) Map.empty
 
-createOutput :: Map SC.ByteString (Stats (SC.ByteString, Integer)) -> IO ()
+createOutput :: Map SC.ByteString (Stats (SC.ByteString, Integer) Day) -> IO ()
 createOutput fnStats
     = do forM_ (Map.toList fnStats) $ \(fn, extStats) ->
              do putStrLn $ SC.unpack fn ++ " " ++ (show $ Map.keys extStats)
@@ -183,7 +191,7 @@ createOutput fnStats
                                        "<p>" ++ printf "%.1f" (downloads extStats) ++ " downloads</p>" ++
                                        "<img src=\"" ++ SC.unpack fn ++ ".png\"/>"
                                   ) (Map.toList fnStats)
-          downloads :: Stats (SC.ByteString, Integer) -> Double
+          downloads :: Stats (SC.ByteString, Integer) Day -> Double
           downloads
               = foldl' (\sum ((ext, fileSize), stats) ->
                             sum + (fromIntegral (Map.fold (+) 0 stats) / fromIntegral fileSize)
@@ -218,12 +226,12 @@ createOutput fnStats
           plotSourceFile = "graph.gnuplot"
           dataFile :: Int -> SC.ByteString
           dataFile i = SC.pack $ "data-" ++ show i
-          writeData :: Int -> Integer -> FileStats -> IO ()
+          writeData :: Int -> Integer -> FileStats Day -> IO ()
           writeData i fileSize stats
               = withFile (SC.unpack $ dataFile i) WriteMode $ \f ->
                 forM_ (fillDayStats stats) $ \(day, size) ->
                 hPutStrLn f $ show day ++ " " ++ show (fromIntegral size / fromIntegral fileSize)
-          fillDayStats :: FileStats -> [(Day, Integer)]
+          fillDayStats :: FileStats Day -> [(Day, Integer)]
           fillDayStats stats
               = do day <- dateRange (fst $ Map.findMin stats, fst $ Map.findMax stats)
                    return (day, fromMaybe 0 $ Map.lookup day stats)
@@ -247,4 +255,6 @@ main = C.getContents >>=
        getFileSizes >>=
        createOutput .
        groupByExt .
-       reduceFilenames
+       reduceFilenames .
+       forgetHosts .
+       limitByHost
