@@ -241,7 +241,7 @@ createOutput fnStats
 
 main = C.getContents >>=
        return .
-       foldl (flip collectRequest) Map.empty .
+       foldl' (flip collectRequest) Map.empty .
        filter (isPentaMedia . reqPath) .
        filter reqIsGet .
        map parseLine .
