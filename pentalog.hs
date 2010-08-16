@@ -24,6 +24,9 @@ import GHC.Conc (numCapabilities)
 import Data.ByteString.Internal (w2c, c2w)
 
 
+-- |in case getFileSize encounters 404
+fallbackSize = 100 * 1024 * 1024  -- 100 MB
+
 getFileSize :: SC.ByteString -> IO Integer
 getFileSize path
     = do putStrLn $ "HEAD " ++ SC.unpack path
@@ -34,7 +37,7 @@ getFileSize path
           headRequest :: HTTP.Request C.ByteString
           headRequest = HTTP.mkRequest HTTP.HEAD uri
           getSize (Right rsp) = read $
-                                fromMaybe "0" $
+                                fromMaybe (show fallbackSize) $
                                 HTTP.findHeader HTTP.HdrContentLength rsp
 
 -- For elder GHC, base, time without instance Ix Date
