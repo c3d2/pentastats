@@ -1,5 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
-module Main (main, getFileSize, chunkify) where
+module Main (main, getFileSize) where
 
 import qualified Data.ByteString.Char8 as SC
 import qualified Data.ByteString.Lazy.Char8 as C
@@ -19,8 +19,6 @@ import System.Directory (removeFile)
 import qualified Network.HTTP as HTTP
 import Network.URI (parseURI)
 import Text.Printf (printf)
-import Control.Parallel.Strategies
-import GHC.Conc (numCapabilities)
 import Data.ByteString.Internal (w2c, c2w)
 
 
@@ -51,7 +49,6 @@ newtype Host = Host SC.ByteString
 data Request = Get !Day !SC.ByteString !Host !Integer
              | Unknown
              deriving (Show)
-instance NFData Request
 reqIsGet (Get _ _ _ _) = True
 reqIsGet _ = False
 reqPath (Get _ path _ _) = path
@@ -242,20 +239,11 @@ createOutput fnStats
               = do day <- dateRange (fst $ Map.findMin stats, fst $ Map.findMax stats)
                    return (day, fromMaybe 0 $ Map.lookup day stats)
 
-chunkify :: Int -> [a] -> [[a]]
-chunkify _ [] = []
-chunkify n xs = let (xs', xs'') = splitAt n xs
-                in xs' : chunkify n xs''
-
-workList = concat . parBuffer (4 * numCapabilities) rdeepseq . chunkify chunkSize
-    where chunkSize = 4096
-
 main = C.getContents >>=
        return .
        foldl (flip collectRequest) Map.empty .
        filter (isPentaMedia . reqPath) .
        filter reqIsGet .
-       workList .
        map parseLine .
        C.lines >>=
        getFileSizes >>=
