@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns, FlexibleInstances #-}
 module Main (main, getFileSize) where
 
 import qualified Data.ByteString.Char8 as SC
@@ -20,6 +20,8 @@ import qualified Network.HTTP as HTTP
 import Network.URI (parseURI)
 import Text.Printf (printf)
 import Data.ByteString.Internal (w2c, c2w)
+import qualified Text.JSON as JSON
+import GHC.Real (Ratio((:%)))
 
 
 -- |in case getFileSize encounters 404
@@ -182,8 +184,38 @@ groupByExt
                                      ) fn
                       ) Map.empty
 
-createOutput :: Map SC.ByteString (Stats (SC.ByteString, Integer) Day) -> IO ()
-createOutput fnStats
+class JAble t where
+  toJ :: t -> JSON.JSValue
+  
+instance (JAble k, JAble a) => JAble (Map k a) where
+  toJ = JSON.JSObject . JSON.toJSObject .
+        map (\(k, a) ->
+                 let JSON.JSString k' = toJ k
+                 in (JSON.fromJSString k', toJ a)
+            ) .
+        Map.toList
+instance JAble Integer where
+  toJ = JSON.JSRational False . fromInteger
+instance JAble Day where
+  toJ = JSON.JSString . JSON.toJSString . show
+instance JAble SC.ByteString where
+  toJ = JSON.JSString . JSON.toJSString . SC.unpack
+instance (JAble a, JAble b) => JAble (a, b) where
+  toJ (a, b) = let JSON.JSString a' = toJ a
+                   b' = case toJ b of
+                          JSON.JSString b' -> JSON.fromJSString b'
+                          JSON.JSRational _ (b' :% b'') -> show $ b' `div` b''
+               in JSON.JSString $ JSON.toJSString $
+                  JSON.fromJSString a' ++ ":" ++ b'
+
+createJSON :: Map SC.ByteString (Stats (SC.ByteString, Integer) Day) -> IO ()
+createJSON fnStats
+    = writeFile "index.json" $ 
+      JSON.encode $
+      toJ fnStats
+
+createGraphs :: Map SC.ByteString (Stats (SC.ByteString, Integer) Day) -> IO ()
+createGraphs fnStats
     = do forM_ (Map.toList fnStats) $ \(fn, extStats) ->
              do putStrLn $ SC.unpack fn ++ " " ++ (show $ Map.keys extStats)
                 render fn extStats
@@ -238,6 +270,10 @@ createOutput fnStats
           fillDayStats stats
               = do day <- dateRange (fst $ Map.findMin stats, fst $ Map.findMax stats)
                    return (day, fromMaybe 0 $ Map.lookup day stats)
+
+createOutput :: Map SC.ByteString (Stats (SC.ByteString, Integer) Day) -> IO ()
+createOutput fnStats = createJSON fnStats >>
+                       createGraphs fnStats
 
 main = C.getContents >>=
        return .
