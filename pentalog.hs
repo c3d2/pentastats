@@ -196,23 +196,24 @@ instance (JAble k, JAble a) => JAble (Map k a) where
         Map.toList
 instance JAble Integer where
   toJ = JSON.JSRational False . fromInteger
+instance JAble Double where
+  toJ = JSON.JSRational True . toRational
 instance JAble Day where
   toJ = JSON.JSString . JSON.toJSString . show
 instance JAble SC.ByteString where
   toJ = JSON.JSString . JSON.toJSString . SC.unpack
-instance (JAble a, JAble b) => JAble (a, b) where
-  toJ (a, b) = let JSON.JSString a' = toJ a
-                   b' = case toJ b of
-                          JSON.JSString b' -> JSON.fromJSString b'
-                          JSON.JSRational _ (b' :% b'') -> show $ b' `div` b''
-               in JSON.JSString $ JSON.toJSString $
-                  JSON.fromJSString a' ++ ":" ++ b'
 
 createJSON :: Map SC.ByteString (Stats (SC.ByteString, Integer) Day) -> IO ()
-createJSON fnStats
-    = writeFile "index.json" $ 
-      JSON.encode $
-      toJ fnStats
+createJSON = writeFile "index.json" .
+             JSON.encode .
+             toJ . convertSizesToDownloads
+    where convertSizesToDownloads :: Map SC.ByteString (Stats (SC.ByteString, Integer) Day)
+                                  ->  Map SC.ByteString (Map SC.ByteString (Map Day Double))
+          convertSizesToDownloads = Map.map $
+                                    Map.mapKeys fst .
+                                    Map.mapWithKey (\(ext, size) extStats ->
+                                                        Map.map ((/ fromIntegral size) . fromIntegral) extStats
+                                                   )
 
 createGraphs :: Map SC.ByteString (Stats (SC.ByteString, Integer) Day) -> IO ()
 createGraphs fnStats
