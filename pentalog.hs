@@ -1,6 +1,7 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns, TupleSections #-}
 module Main (main, getFileSize) where
 
+import Control.Applicative
 import qualified Data.ByteString.Char8 as SC
 import qualified Data.ByteString.Lazy.Char8 as C
 import Data.Attoparsec.Lazy hiding (take)
@@ -20,6 +21,7 @@ import qualified Network.HTTP as HTTP
 import Network.URI (parseURI)
 import Text.Printf (printf)
 import Data.ByteString.Internal (w2c, c2w)
+import qualified Text.JSON as JSON
 
 
 -- |in case getFileSize encounters 404
@@ -141,13 +143,36 @@ isPentaMedia fn = not (SC.null fn) &&
           isValid = SC.all (`notElem` "?&")
 
 getFileSizes :: Stats SC.ByteString a -> IO (Stats (SC.ByteString, Integer) a)
-getFileSizes
-    = liftM Map.fromList .
-      mapM (\(fn, stats) ->
-                do size <- getFileSize fn
-                   return ((fn, size), stats)
-           ) .
-      Map.toList
+getFileSizes stats = do sizes <- catch loadSizes (const $ return Map.empty)
+                        sizes' <- getMissingSizes sizes stats
+                        putStrLn $ "sizes: " ++ JSON.encode sizes'
+                        saveSizes sizes'
+                        return $ fillIn sizes stats
+  where sizesFile = "sizes.json"
+        loadSizes :: IO (Map SC.ByteString Integer)
+        loadSizes = do JSON.Ok a <- JSON.decode <$> readFile sizesFile
+                       return a
+        getMissingSizes :: Map SC.ByteString Integer -> Stats SC.ByteString a -> IO (Map SC.ByteString Integer)
+        getMissingSizes sizes stats
+          = Map.fromList <$>
+            forM (Map.toList stats) 
+            (\(fn, _) ->
+              case Map.lookup fn sizes of
+                Nothing ->
+                  (fn, ) <$> getFileSize fn
+                Just size ->
+                  return (fn, size)
+            )
+        saveSizes :: Map SC.ByteString Integer -> IO ()
+        saveSizes = writeFile sizesFile . JSON.encode
+        fillIn :: Map SC.ByteString Integer -> Stats SC.ByteString a -> Stats (SC.ByteString, Integer) a
+        fillIn sizes 
+          = Map.fromList .
+            map (\(fn, stats) ->
+                  let Just size = Map.lookup fn sizes
+                  in ((fn, size), stats)
+                ) .
+            Map.toList
 
 reduceFilenames :: Stats (SC.ByteString, Integer) Day -> Stats (SC.ByteString, SC.ByteString, Integer) Day
 reduceFilenames
