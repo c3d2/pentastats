@@ -134,6 +134,7 @@ isPentaMedia fn = not (SC.null fn) &&
                   (fn `startsWith` "/pentaradio/" ||
                    fn `startsWith` "/pentacast/" ||
                    fn `startsWith` "/datenspuren/" ||
+                   fn `startsWith` "/themenabend/" ||
                    fn `startsWith` "/video/")
     -- TODO: URL normalization & URI decoding
     where startsWith a b = take (fromIntegral $ length b) (SC.unpack a) == b
