@@ -152,32 +152,36 @@ getFileSizes stats = do sizes <- catch loadSizes (const $ return Map.empty)
                         sizes' <- getMissingSizes sizes stats
                         putStrLn $ "sizes: " ++ JSON.encode sizes'
                         saveSizes sizes'
-                        return $ fillIn sizes stats
+                        fillIn sizes stats
   where sizesFile = "sizes.json"
         loadSizes :: IO (Map SC.ByteString Integer)
         loadSizes = do JSON.Ok a <- JSON.decode <$> readFile sizesFile
                        return a
-        getMissingSizes :: Map SC.ByteString Integer -> Stats SC.ByteString a -> IO (Map SC.ByteString Integer)
+        getMissingSizes :: Map SC.ByteString Integer 
+                           -> Stats SC.ByteString a 
+                           -> IO (Map SC.ByteString Integer)
         getMissingSizes sizes stats
           = Map.fromList <$>
-            forM (Map.toList stats) 
-            (\(fn, _) ->
-              case Map.lookup fn sizes of
-                Nothing ->
-                  (fn, ) <$> getFileSize fn
-                Just size ->
-                  return (fn, size)
-            )
+            mapM (\(fn, _) ->
+                   case Map.lookup fn sizes of
+                     Nothing ->
+                       (fn, ) <$> getFileSize fn
+                     Just size ->
+                       return (fn, size)
+                 ) (Map.toList stats)
         saveSizes :: Map SC.ByteString Integer -> IO ()
         saveSizes = writeFile sizesFile . JSON.encode
-        fillIn :: Map SC.ByteString Integer -> Stats SC.ByteString a -> Stats (SC.ByteString, Integer) a
-        fillIn sizes 
-          = Map.fromList .
-            map (\(fn, stats) ->
-                  let Just size = Map.lookup fn sizes
-                  in ((fn, size), stats)
-                ) .
-            Map.toList
+        fillIn :: Map SC.ByteString Integer -> Stats SC.ByteString a -> IO (Stats (SC.ByteString, Integer) a)
+        fillIn sizes stats
+          = Map.fromList <$>
+            mapM (\(fn, stats) ->
+                   case Map.lookup fn sizes of
+                        Just size ->
+                          return ((fn, size), stats)
+                        Nothing ->
+                          do putStrLn $ "No file size for " ++ show fn
+                             return $ ((fn, 100 * 1024 * 1024), stats)
+                ) (Map.toList stats)
 
 reduceFilenames :: Stats (SC.ByteString, Integer) Day -> Stats (SC.ByteString, SC.ByteString, Integer) Day
 reduceFilenames
