@@ -209,16 +209,16 @@ limitByHost = Map.mapWithKey $ \(fn, size) ->
               
 forgetHosts :: Stats (SC.ByteString, Integer) (Day, Host) -> Stats (SC.ByteString, Integer) Day
 forgetHosts = Map.map $ 
-              Map.foldWithKey (\(day, host) transmitted ->
-                                   Map.alter (Just . (+ transmitted) . fromMaybe 0) day
-                              ) Map.empty
+              Map.foldrWithKey (\(day, host) transmitted ->
+                                 Map.alter (Just . (+ transmitted) . fromMaybe 0) day
+                               ) Map.empty
 
 groupByExt :: Stats (SC.ByteString, SC.ByteString, Integer) Day -> Map SC.ByteString (Stats (SC.ByteString, Integer) Day)
 groupByExt
-    = Map.foldWithKey (\(fn, ext, size) stats ->
-                           Map.alter (Just . Map.insert (ext, size) stats . fromMaybe Map.empty
-                                     ) fn
-                      ) Map.empty
+    = Map.foldrWithKey (\(fn, ext, size) stats ->
+                         Map.alter (Just . Map.insert (ext, size) stats . fromMaybe Map.empty
+                                   ) fn
+                       ) Map.empty
 
 class JAble t where
   toJ :: t -> JSON.JSValue
