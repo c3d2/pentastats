@@ -150,13 +150,17 @@ isPentaMedia fn = not (SC.null fn) &&
 getFileSizes :: Stats SC.ByteString a -> IO (Stats (SC.ByteString, Integer) a)
 getFileSizes stats = do sizes <- catch loadSizes (const $ return Map.empty)
                         sizes' <- getMissingSizes sizes stats
-                        putStrLn $ "sizes: " ++ JSON.encode sizes'
+                        putStrLn $ "sizes: " ++ JSON.encode (toJSON sizes')
                         saveSizes sizes'
-                        fillIn sizes stats
+                        fillIn sizes' stats
   where sizesFile = "sizes.json"
+        fromJSON :: JSON.JSObject Integer -> Map SC.ByteString Integer
+        fromJSON = Map.mapKeys SC.pack . Map.fromList . JSON.fromJSObject
+        toJSON :: Map SC.ByteString Integer -> JSON.JSObject Integer
+        toJSON = JSON.toJSObject . Map.toList . Map.mapKeys SC.unpack
         loadSizes :: IO (Map SC.ByteString Integer)
-        loadSizes = do JSON.Ok a <- JSON.decode <$> readFile sizesFile
-                       return a
+        loadSizes = do JSON.Ok json <- JSON.decode <$> readFile sizesFile
+                       return $ fromJSON json
         getMissingSizes :: Map SC.ByteString Integer 
                            -> Stats SC.ByteString a 
                            -> IO (Map SC.ByteString Integer)
@@ -170,7 +174,7 @@ getFileSizes stats = do sizes <- catch loadSizes (const $ return Map.empty)
                        return (fn, size)
                  ) (Map.toList stats)
         saveSizes :: Map SC.ByteString Integer -> IO ()
-        saveSizes = writeFile sizesFile . JSON.encode
+        saveSizes = writeFile sizesFile . JSON.encode . toJSON
         fillIn :: Map SC.ByteString Integer -> Stats SC.ByteString a -> IO (Stats (SC.ByteString, Integer) a)
         fillIn sizes stats
           = Map.fromList <$>
