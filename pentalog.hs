@@ -7,7 +7,7 @@ import qualified Data.ByteString.Lazy.Char8 as C
 import Data.Attoparsec.Lazy hiding (take)
 import Prelude hiding (takeWhile)
 import Data.Char (isDigit, isAlpha)
-import Control.Monad (liftM, forM_, forM)
+import Control.Monad (liftM, forM_, forM, when)
 import Data.Time.Clock
 import Data.Time.Calendar (Day, addDays, fromGregorian)
 import Data.Maybe (fromMaybe)
@@ -75,19 +75,19 @@ parseLine = {-# SCC "getResult" #-} getResult . {-# SCC "parse" #-} parse line
                     takeWhile ((/= '"') . w2c)
                     char '"'
                     method <- {-# SCC "wordMethod" #-} word
+                    when (SC.unpack method /= "GET") $
+                      fail "Not GET"
                     space
                     path <- {-# SCC "wordPath" #-} word
                     space
                     ver <- {-# SCC "wordVer" #-} word
                     space
                     code <- {-# SCC "wordCode" #-} num'
+                    when (code < 200 || code >= 300) $
+                      fail "Wrong response code"
                     space
                     size <- {-# SCC "wordSize" #-} num
-                    return $ if {-# SCC "unpackMethod" #-} SC.unpack method == "GET" &&
-                                code >= 200 &&
-                                code < 300
-                             then {-# SCC "Get" #-} Get date path host size
-                             else {-# SCC "Unknown" #-} Unknown
+                    return $ {-# SCC "Get" #-} Get date path host size
           char = word8 . c2w
           space = char ' '
           word = takeWhile $ (/= ' ') . w2c
