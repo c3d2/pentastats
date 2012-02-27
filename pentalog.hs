@@ -130,7 +130,7 @@ type FileStats k = Map k Integer
 
 collectRequest :: Request -> Stats SC.ByteString (Day, Host) -> Stats SC.ByteString (Day, Host)
 collectRequest (Get day file host size) = Map.alter (Just .
-                                                     Map.insertWith' (\a b -> force $ a + b) (day, host) size .
+                                                     Map.insertWith' (\a b -> a + b) (day, host) size .
                                                      fromMaybe Map.empty
                                                     ) file
 collectRequest Unknown = id
