@@ -66,6 +66,7 @@ parseLine = {-# SCC "getResult" #-} getResult . {-# SCC "parse" #-} parse line
     where getResult (Done _ !a) = a
           getResult _ = Unknown
           line = do host <- {-# SCC "wordHost" #-} host
+                    space
                     ident <- {-# SCC "wordIdent" #-} word
                     space
                     user <- {-# SCC "wordUser" #-} word
@@ -93,13 +94,12 @@ parseLine = {-# SCC "getResult" #-} getResult . {-# SCC "parse" #-} parse line
           word = takeWhile $ (/= ' ') . w2c
           num = (maybe 0 fst . SC.readInteger) `liftM` takeWhile (isDigit . w2c)
           num' = (maybe 0 fst . SC.readInt) `liftM` takeWhile (isDigit . w2c)
-          host = (do h <- takeWhile ((\c -> isDigit c || c == '.') . w2c)
-                     space
-                     return $ Host4 $ readAddress $ SC.unpack h)
-                 <|>
-                 (do h <- takeWhile ((\c -> isDigit c || c `elem` "abcdef" || c == ':') . w2c)
-                     space
-                     return $ Host6 $ readAddress $ SC.unpack h)
+          host = do h <- SC.unpack `liftM` word
+                    case '.' `elem` h of
+                      True ->
+                        return $ Host4 $ readAddress h
+                      False ->
+                        return $ Host6 $ readAddress h
 
           date = do day <- num'
                     char '/'
