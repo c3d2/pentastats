@@ -15,7 +15,7 @@ import Data.List (foldl', intercalate)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import System.IO
-import System (system)
+import System.Cmd (system)
 import System.Directory (removeFile)
 import qualified Network.HTTP as HTTP
 import Network.URI (parseURI)
