@@ -95,10 +95,10 @@ parseLine = {-# SCC "getResult" #-} getResult . {-# SCC "parse" #-} parse line
           num = (maybe 0 fst . SC.readInteger) `liftM` takeWhile (isDigit . w2c)
           num' = (maybe 0 fst . SC.readInt) `liftM` takeWhile (isDigit . w2c)
           host = do h <- SC.unpack `liftM` word
-                    case '.' `elem` h of
-                      True ->
-                        return $ Host4 $ readAddress h
+                    case ':' `elem` h of
                       False ->
+                        return $ Host4 $ readAddress h
+                      True ->
                         return $ Host6 $ readAddress h
 
           date = do day <- num'
