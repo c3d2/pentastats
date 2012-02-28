@@ -108,22 +108,16 @@ parseLine = {-# SCC "getResult" #-} getResult . {-# SCC "parse" #-} parse line
                     year <- num
                     char ':'
                     return $ fromGregorian year month day
-          month = let m name num = takeWhile (isAlpha . w2c) >>= \name' ->
-                                   if SC.unpack name' == name
-                                   then return num
-                                   else fail $ "No such month: " ++ SC.unpack name'
-                  in choice [m "Jan" 1,
-                             m "Feb" 2,
-                             m "Mar" 3,
-                             m "Apr" 4,
-                             m "May" 5,
-                             m "Jun" 6,
-                             m "Jul" 7,
-                             m "Aug" 8,
-                             m "Sep" 9,
-                             m "Oct" 10,
-                             m "Nov" 11,
-                             m "Dec" 12]
+          month = fromMaybe (error "Invalid month") <$>
+                  flip Map.lookup months <$> 
+                  takeWhile (isAlpha . w2c)
+            where
+              months = Map.fromList $ zip months' [1..]
+              months' = map SC.pack months''
+              months'' = ["Jan", "Feb", "Mar",
+                          "Apr", "May", "Jun",
+                          "Jul", "Aug", "Sep",
+                          "Oct", "Nov", "Dec"]
 
 type Stats k k' = Map k (FileStats k')
 type FileStats k = Map k Integer
